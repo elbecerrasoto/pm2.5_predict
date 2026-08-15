@@ -254,9 +254,10 @@ p_distribucion <- ggplot(df_oos, aes(x = Error)) +
   tema_profesional
 ggsave(GRAFICA_OOS_DIST_ERROR, plot = p_distribucion, width = 8, height = 6)
 
+# Exportar hiperparámetros (incluyendo la ruta del archivo de entrada)
 hparams_df <- tibble(
-  Parametro = c("N_Changepoints", "Changepoint_Prior_Scale", "Seasonality_Mode", "Seasonality_Prior_Scale", "Usar_Festivos_MX", "RMSE_Out_of_Sample", "MAE_Out_of_Sample"),
-  Valor = c(as.character(mejor_modelo_params$cp_n), as.character(mejor_modelo_params$cp_prior), mejor_modelo_params$seas_mode, as.character(mejor_modelo_params$seas_prior), as.character(mejor_modelo_params$usar_festivos), as.character(round(rmse_oos, 4)), as.character(round(mae_oos, 4)))
+  Parametro = c("Archivo_Datos", "N_Changepoints", "Changepoint_Prior_Scale", "Seasonality_Mode", "Seasonality_Prior_Scale", "Usar_Festivos_MX", "RMSE_Out_of_Sample", "MAE_Out_of_Sample"),
+  Valor = c(ARCHIVO_DATOS, as.character(mejor_modelo_params$cp_n), as.character(mejor_modelo_params$cp_prior), mejor_modelo_params$seas_mode, as.character(mejor_modelo_params$seas_prior), as.character(mejor_modelo_params$usar_festivos), as.character(round(rmse_oos, 4)), as.character(round(mae_oos, 4)))
 )
 write_tsv(hparams_df, SALIDA_HPARAMS)
 
@@ -317,7 +318,7 @@ grafica_principal <- ggplot() +
   scale_color_manual(name = "", values = c("Valor Real" = "#5D6D7E", "Valor Proyectado" = "#D81B60")) +
   tema_profesional +
   labs(
-    title = "Pronóstico Final de PM2.5",
+    title = "Pronóstico de PM2.5",
     subtitle = paste("Predicción proyectada hasta el", format(PROYECCION_FINAL, "%d de %B, %Y")),
     x = "Fecha", y = "Concentración de PM2.5 (µg/m³)"
   ) +
