@@ -34,6 +34,10 @@ option_list <- list(
   make_option(c("-c", "--cv"),
     action = "store_true", default = FALSE,
     help = "Activa la búsqueda por validación cruzada (si se omite, no se realiza CV)"
+  ),
+  make_option(c("-p", "--proyeccion_final"),
+    type = "character", default = "2026-12-31",
+    help = "Fecha final de la proyección en formato YYYY-MM-DD [default: %default]"
   )
 )
 
@@ -48,6 +52,11 @@ if (is.null(opt$input)) {
 ARCHIVO_DATOS <- opt$input
 DIR_RESULTADOS <- opt$output_dir
 REALIZAR_CV <- opt$cv
+PROYECCION_FINAL <- ymd(opt$proyeccion_final)
+
+if (is.na(PROYECCION_FINAL)) {
+  stop("ERROR CRÍTICO: El parámetro '--proyeccion_final' (-p) debe ser una fecha válida en formato YYYY-MM-DD.", call. = FALSE)
+}
 
 # ==============================================================================
 # PASO 3. VARIABLES GLOBALES Y TEMA
@@ -69,8 +78,6 @@ SEASONALITY_MODES <- c("additive", "multiplicative")
 SEASONALITY_PRIOR_SCALES <- c(1.0, 10.0)
 CP_RANGE <- 0.8
 INTERVALO_CONFIANZA <- 0.95
-
-PROYECCION_FINAL <- ymd("2026-12-31")
 
 # Rutas de salida para los archivos generados
 SALIDA_MODELO <- file.path(DIR_RESULTADOS, glue("{SALIDA_ETIQUETA}_modelo.Rds"))
@@ -254,10 +261,34 @@ p_distribucion <- ggplot(df_oos, aes(x = Error)) +
   tema_profesional
 ggsave(GRAFICA_OOS_DIST_ERROR, plot = p_distribucion, width = 8, height = 6)
 
-# Exportar hiperparámetros (incluyendo la ruta del archivo de entrada)
+# Exportar hiperparámetros (incluyendo la ruta del archivo, la fecha de ejecución y parámetros globales)
 hparams_df <- tibble(
-  Parametro = c("Archivo_Datos", "N_Changepoints", "Changepoint_Prior_Scale", "Seasonality_Mode", "Seasonality_Prior_Scale", "Usar_Festivos_MX", "RMSE_Out_of_Sample", "MAE_Out_of_Sample"),
-  Valor = c(ARCHIVO_DATOS, as.character(mejor_modelo_params$cp_n), as.character(mejor_modelo_params$cp_prior), mejor_modelo_params$seas_mode, as.character(mejor_modelo_params$seas_prior), as.character(mejor_modelo_params$usar_festivos), as.character(round(rmse_oos, 4)), as.character(round(mae_oos, 4)))
+  Parametro = c(
+    "Timestamp_Ejecucion",
+    "Archivo_Datos",
+    "Dias_Prueba_OOS",
+    "Proyeccion_Final",
+    "N_Changepoints",
+    "Changepoint_Prior_Scale",
+    "Seasonality_Mode",
+    "Seasonality_Prior_Scale",
+    "Usar_Festivos_MX",
+    "RMSE_Out_of_Sample",
+    "MAE_Out_of_Sample"
+  ),
+  Valor = c(
+    as.character(Sys.time()),
+    ARCHIVO_DATOS,
+    as.character(DIAS_PRUEBA),
+    as.character(PROYECCION_FINAL),
+    as.character(mejor_modelo_params$cp_n),
+    as.character(mejor_modelo_params$cp_prior),
+    mejor_modelo_params$seas_mode,
+    as.character(mejor_modelo_params$seas_prior),
+    as.character(mejor_modelo_params$usar_festivos),
+    as.character(round(rmse_oos, 4)),
+    as.character(round(mae_oos, 4))
+  )
 )
 write_tsv(hparams_df, SALIDA_HPARAMS)
 
