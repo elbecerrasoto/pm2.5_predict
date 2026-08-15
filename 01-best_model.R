@@ -32,15 +32,14 @@ option_list <- list(
     help = "Directorio donde se guardarán los resultados [default: %default]"
   ),
   make_option(c("-c", "--cv"),
-    type = "logical", default = FALSE,
-    help = "Ejecutar validación cruzada para buscar hiperparámetros (TRUE/FALSE) [default: %default]"
+    action = "store_true", default = FALSE,
+    help = "Activa la búsqueda por validación cruzada (si se omite, no se realiza CV)"
   )
 )
 
 opt_parser <- OptionParser(option_list = option_list, description = "Ajuste de Prophet y Cross-Validation")
 opt <- parse_args(opt_parser)
 
-# Validar que el archivo de entrada fue proporcionado
 if (is.null(opt$input)) {
   print_help(opt_parser)
   stop("ERROR CRÍTICO: El parámetro '--input' (-i) es obligatorio.", call. = FALSE)
@@ -55,7 +54,6 @@ REALIZAR_CV <- opt$cv
 # ==============================================================================
 SALIDA_ETIQUETA <- "PM2.5"
 
-# Valores por defecto si se omite la validación cruzada
 NO_CV <- list(
   cp_n = 42,
   cp_prior = 0.1,
@@ -86,6 +84,7 @@ GRAFICA_OOS_DIST_ERROR <- file.path(DIR_RESULTADOS, glue("{SALIDA_ETIQUETA}_oos_
 # Gráficas de Producción
 GRAFICA_PRINCIPAL <- file.path(DIR_RESULTADOS, glue("{SALIDA_ETIQUETA}_prediccion.svg"))
 GRAFICA_COMPONENTES <- file.path(DIR_RESULTADOS, glue("{SALIDA_ETIQUETA}_componentes.svg"))
+GRAFICA_PROD_RESIDUALES <- file.path(DIR_RESULTADOS, glue("{SALIDA_ETIQUETA}_prod_residuales.svg"))
 
 tema_profesional <- theme_minimal() +
   theme(
@@ -162,7 +161,6 @@ if (REALIZAR_CV) {
     )
     if (usar_festivos) m_temp <- add_country_holidays(m_temp, country_name = "MX")
 
-    # Silenciar salidas de consola y advertencias de deprecación internas en workers
     suppressWarnings(suppressMessages(m_temp <- fit.prophet(m_temp, TJ_train)))
 
     df_cv <- cross_validation(m_temp, initial = 365, period = 90, horizon = 60, units = "days")
@@ -193,7 +191,6 @@ if (REALIZAR_CV) {
 
   subtitulo_cv <- glue("Modelo Ganador: Estacionalidad {mejor_modelo_params$seas_mode} | Festivos MX: {ifelse(mejor_modelo_params$usar_festivos, 'Sí', 'No')}")
 
-  # Suprimir la advertencia de ggplot2/prophet en la gráfica de métricas CV
   plot_cv <- suppressWarnings(plot_cross_validation_metric(df_cv_final, metric = "rmse")) +
     tema_profesional +
     labs(
@@ -204,7 +201,7 @@ if (REALIZAR_CV) {
 
   ggsave(GRAFICA_CV_METRICAS, plot = plot_cv, width = 9, height = 6)
 } else {
-  cat("\n[INFO] Validación Cruzada omitida (--cv FALSE). Usando valores configurados por defecto...\n")
+  cat("\n[INFO] Validación Cruzada omitida (bandera --cv no presente). Usando valores configurados por defecto...\n")
   mejor_modelo_params <- NO_CV
 }
 
@@ -279,28 +276,56 @@ modelo_produccion <- prophet(
 if (mejor_modelo_params$usar_festivos) modelo_produccion <- add_country_holidays(modelo_produccion, country_name = "MX")
 suppressWarnings(suppressMessages(modelo_produccion <- fit.prophet(modelo_produccion, TJ_prophet)))
 
-resultados_prod_log <- predict(modelo_produccion, TJ_prophet |> select(ds))
+# ---- 7.1 CALCULAR PRONÓSTICO (IN-SAMPLE + OUT-OF-SAMPLE) ----
+fecha_ultima <- max(TJ_prophet$ds)
+PROYECCION_INICIO <- fecha_ultima + days(1)
+dias_futuros <- as.numeric(PROYECCION_FINAL - fecha_ultima)
+
+futuro_prod <- make_future_dataframe(modelo_produccion, periods = dias_futuros, freq = "day")
+resultados_prod_log <- predict(modelo_produccion, futuro_prod)
+
 resultados_prod <- resultados_prod_log |>
-  mutate(ds = as_date(ds), yhat = exp(yhat), yhat_lower = exp(yhat_lower), yhat_upper = exp(yhat_upper))
+  mutate(ds = as_date(ds), yhat = exp(yhat), yhat_lower = exp(yhat_lower), yhat_upper = exp(yhat_upper)) |>
+  filter(ds <= PROYECCION_FINAL)
 
-puntos_cambio <- as_date(modelo_produccion$changepoints)
+# ---- 7.2 RESIDUALES DEL MODELO DE PRODUCCIÓN (IN-SAMPLE) ----
+df_prod_eval <- resultados_prod |>
+  filter(ds <= fecha_ultima) |>
+  select(ds, yhat) |>
+  inner_join(TJ_prophet |> select(ds, y_original), by = "ds") |>
+  mutate(Error = y_original - yhat)
 
+p_residuales_prod <- ggplot(df_prod_eval, aes(x = ds, y = Error)) +
+  geom_segment(aes(xend = ds, yend = 0), color = "#95A5A6", alpha = 0.5) +
+  geom_point(color = "#16A085", alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "#E74C3C", linetype = "dashed") +
+  labs(
+    title = "Residuales Intramuestra (Modelo de Producción)",
+    subtitle = "Errores del ajuste final entrenado con el 100% de la historia",
+    x = "Fecha", y = "Error (Real - Predicción)"
+  ) +
+  tema_profesional
+
+ggsave(GRAFICA_PROD_RESIDUALES, plot = p_residuales_prod, width = 10, height = 5)
+
+# ---- 7.3 GRÁFICO PRINCIPAL DE PRONÓSTICO CON LEYENDAS (PAPER-READY) ----
 grafica_principal <- ggplot() +
   geom_ribbon(data = resultados_prod, aes(x = ds, ymin = yhat_lower, ymax = yhat_upper), fill = "#B0BEC5", alpha = 0.4) +
-  geom_point(data = TJ_prophet, aes(x = ds, y = y_original), color = "#5D6D7E", size = 1.2, alpha = 0.5) +
-#  geom_vline(xintercept = puntos_cambio, color = "#99A3A4", linetype = "dotted", linewidth = 0.6, alpha = 0.8) + # removing this for now
-  geom_line(data = resultados_prod, aes(x = ds, y = yhat), color = "#D81B60", linewidth = 1) +
+  geom_vline(xintercept = PROYECCION_INICIO, color = "#2C3E50", linetype = "dashed", linewidth = 1) +
+  geom_point(data = TJ_prophet, aes(x = ds, y = y_original, color = "Valor Real"), size = 1.2, alpha = 0.5) +
+  geom_line(data = resultados_prod, aes(x = ds, y = yhat, color = "Valor Proyectado"), linewidth = 1) +
+  scale_color_manual(name = "", values = c("Valor Real" = "#5D6D7E", "Valor Proyectado" = "#D81B60")) +
   tema_profesional +
   labs(
-    title = "Ajuste Final del Modelo de PM2.5",
-    subtitle = "Tendencia capturada sobre el 100% de los datos históricos",
+    title = "Pronóstico Final de PM2.5",
+    subtitle = paste("Predicción proyectada hasta el", format(PROYECCION_FINAL, "%d de %B, %Y")),
     x = "Fecha", y = "Concentración de PM2.5 (µg/m³)"
   ) +
   scale_x_date(date_labels = "%b %Y", date_breaks = "6 months")
 
 ggsave(GRAFICA_PRINCIPAL, plot = grafica_principal, width = 12, height = 7)
 
-# Suprimir advertencia de aes_string al exportar componentes
+# ---- 7.4 GRÁFICA DE COMPONENTES ----
 svglite::svglite(GRAFICA_COMPONENTES, width = 10, height = 8)
 suppressWarnings(prophet_plot_components(modelo_produccion, resultados_prod_log))
 invisible(dev.off())
