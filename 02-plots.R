@@ -57,103 +57,63 @@ TJ_prophet <- TJ |>
   # Transformación LOG para asegurar que no haya predicciones negativas.
   mutate(y = log(y_original + 1e-9))
 
+
+
+
+
 # ==============================================================================
-# PASO 4. VALIDACIÓN CRUZADA EN PARALELO
+# PASO 3. PREPARACIÓN DE DIRECTORIO, DATOS Y ASERCIONES (ASSERTIONS)
 # ==============================================================================
-if (REALIZAR_CV) {
-  cat("Iniciando Validación Cruzada en PARALELO para elegir hiperparámetros...\n")
-
-  # Cuadrícula (grid) incluyendo puntos de cambio (cp_n)
-  grid_busqueda <- expand_grid(
-    cp_n = CP_N,
-    cp_prior = CP_PRIOR_SCALES,
-    usar_festivos = c(FALSE, TRUE)
-  )
-
-  # Configurar el plan de paralelización (usando todos los núcleos disponibles menos 1)
-  nucleos_disponibles <- parallelly::availableCores() - 1
-  plan(multisession, workers = max(1, nucleos_disponibles))
-
-  cat(sprintf(
-    "Evaluando %d combinaciones usando %d núcleos. Por favor espera...\n",
-    nrow(grid_busqueda), max(1, nucleos_disponibles)
-  ))
-
-  # future_pmap_dfr itera sobre el grid en paralelo y consolida los resultados en un DataFrame
-  resultados_cv <- future_pmap_dfr(grid_busqueda, function(cp_n, cp_prior, usar_festivos) {
-    # 1. Instanciar modelo temporal
-    m_temp <- prophet(
-      n.changepoints = cp_n,
-      changepoint.range = CP_RANGE,
-      changepoint.prior.scale = cp_prior
-    )
-
-    if (usar_festivos) {
-      m_temp <- add_country_holidays(m_temp, country_name = "MX")
-    }
-
-    # Ajustar modelo suprimiendo salidas a consola por hilo
-    m_temp <- fit.prophet(m_temp, TJ_prophet)
-
-    # 2. Ejecutar Cross-Validation
-    df_cv <- cross_validation(m_temp, initial = 365, period = 180, horizon = 90, units = "days")
-    df_p <- performance_metrics(df_cv)
-    rmse_promedio <- mean(df_p$rmse)
-
-    # 3. Retornar los parámetros, su error, y anidar el dataframe del CV
-    tibble(
-      cp_n = cp_n,
-      cp_prior = cp_prior,
-      usar_festivos = usar_festivos,
-      rmse = rmse_promedio,
-      df_cv_data = list(df_cv) # Guardamos los datos completos como lista
-    )
-  }, .options = furrr_options(seed = TRUE))
-
-  # Volver a procesamiento secuencial por buenas prácticas
-  plan(sequential)
-
-  # Encontrar el modelo con el menor RMSE
-  mejor_resultado <- resultados_cv |>
-    arrange(rmse) |>
-    slice(1)
-  mejor_modelo_params <- as.list(mejor_resultado)
-  df_cv_final <- mejor_resultado$df_cv_data[[1]]
-
-  cat(sprintf(
-    ">>> Mejor modelo -> N Puntos: %d | Escala: %f | Festivos: %s | RMSE: %f\n",
-    mejor_modelo_params$cp_n, mejor_modelo_params$cp_prior, mejor_modelo_params$usar_festivos, mejor_modelo_params$rmse
-  ))
-
-  # Gráfica Troubleshooting: Evolución del error (RMSE) en el horizonte de CV
-  png(GRAFICA_CV_METRICAS, width = 800, height = 600, res = 100)
-  print(plot_cross_validation_metric(df_cv_final, metric = "rmse"))
-  dev.off()
-} else {
-  cat("Validación Cruzada omitida. Usando los primeros valores de las variables globales...\n")
-  mejor_modelo_params <- list(
-    cp_n = CP_N[1],
-    cp_prior = CP_PRIOR_SCALES[1],
-    usar_festivos = TRUE # Se asume TRUE por defecto si se salta la CV
-  )
+# Crear el directorio de resultados si no existe
+if (!dir.exists(DIR_RESULTADOS)) {
+  dir.create(DIR_RESULTADOS, recursive = TRUE, showWarnings = FALSE)
 }
 
-# ==============================================================================
-# PASO 5. AJUSTAR MODELO FINAL Y PREDECIR
-# ==============================================================================
-# Entrenar el modelo final incorporando la configuración ganadora
-modelo_prophet <- prophet(
-  n.changepoints = mejor_modelo_params$cp_n,
-  changepoint.range = CP_RANGE,
-  changepoint.prior.scale = mejor_modelo_params$cp_prior,
-  interval.width = INTERVALO_CONFIANZA
+# Cargar tabla
+TJ <- read_excel(ARCHIVO_DATOS)
+
+# Aserciones: Garantizar que la tabla tiene la estructura correcta
+stopifnot(
+  "ERROR: La tabla debe contener las columnas exactas 'FECHA' y 'PM2.5'" =
+    all(c("FECHA", "PM2.5") %in% colnames(TJ))
 )
 
-if (mejor_modelo_params$usar_festivos) {
-  modelo_prophet <- add_country_holidays(modelo_prophet, country_name = "MX")
-}
+# Aserciones: Garantizar que no hay NAs después de la limpieza
+stopifnot(
+  "ERROR: Se detectaron valores faltantes (NA)" =
+    !any(is.na(TJ$FECHA)) && !any(is.na(TJ$PM2.5))
+)
 
-modelo_prophet <- fit.prophet(modelo_prophet, TJ_prophet)
+# Limpiar y castear tipos de datos
+TJ <- TJ |>
+  mutate(
+    FECHA = as_date(FECHA),
+    PM2.5 = as.numeric(PM2.5)
+  ) # |> drop_na(FECHA, PM2.5)
+
+
+TJ_prophet <- TJ |>
+  rename(ds = FECHA, y_original = PM2.5) |>
+  # Transformación LOG para asegurar que no haya predicciones negativas.
+  mutate(y = log(y_original + 1e-9))
+
+# Separación (Split) de datos: Entrenamiento y Prueba (OOS)
+fecha_corte <- max(TJ_prophet$ds) - days(DIAS_PRUEBA)
+TJ_train <- TJ_prophet |> filter(ds <= fecha_corte)
+TJ_test <- TJ_prophet |> filter(ds > fecha_corte)
+
+cat(sprintf(
+  "Datos divididos: %d filas de entrenamiento, %d filas para prueba (OOS)\n",
+  nrow(TJ_train), nrow(TJ_test)
+))
+
+
+
+
+
+
+
+
 
 # Calcular días futuros y predecir
 dias_futuros <- as.numeric(PROYECCION_FINAL - max(TJ_prophet$ds))
@@ -174,9 +134,11 @@ resultados <- resultados_log |>
 names(resultados)
 
 resultados <- resultados |>
-  select(-(`Ano Nuevo [New Year's Day]`:`Dia del Trabajo [Labour Day] (Observed)_upper`), -(`Natalicio de Benito Juarez [Benito Juarez's birthday]`:`Navidad [Christmas] (Observed)_upper`),
-         -starts_with("multiplicative"))
-  
+  select(
+    -(`Ano Nuevo [New Year's Day]`:`Dia del Trabajo [Labour Day] (Observed)_upper`), -(`Natalicio de Benito Juarez [Benito Juarez's birthday]`:`Navidad [Christmas] (Observed)_upper`),
+    -starts_with("multiplicative")
+  )
+
 resultados <- resultados |>
   filter(ds > ymd("2021-12-31"))
 puntos_cambio <- as_date(modelo_prophet$changepoints)
