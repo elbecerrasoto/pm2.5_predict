@@ -1,12 +1,27 @@
+<div align="center">
+
 # Pronóstico de Calidad del Aire ($PM_{2.5}$) con Prophet
 
-Este proyecto proporciona un pipeline automatizado en **R** para el modelado, validación cruzada, evaluación fuera de muestra (*Out-of-Sample*) y generación de proyecciones de calidad del aire ($PM_{2.5}$) utilizando **Facebook Prophet**.
+[![R Language](https://img.shields.io/badge/Language-R-blue.svg)](https://www.r-project.org/)
+[![Prophet](https://img.shields.io/badge/Model-Facebook_Prophet-1877F2.svg)](https://facebook.github.io/prophet/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Está diseñado bajo estándares rigurosos de investigación científica y reproducibilidad:
-* **Log-Transformación pura ($\log(y)$):** Evita predicciones de concentraciones negativas sin distorsionar los datos con constantes arbitrarias.
-* **Validación Cruzada en Paralelo:** Búsqueda en cuadrícula (*Grid Search*) acelerada mediante procesamiento multinúcleo con barra de progreso.
-* **Evaluación Fuera de Muestra (OOS):** División estricta en conjunto de datos de entrenamiento y prueba (*Hold-out set*) para estimar el error real ($RMSE$ y $MAE$).
-* **Visualizaciones Vectoriales (`.svg`):** Gráficas con temas personalizados (inspirados en *FiveThirtyEight*), listas para su inclusión en publicaciones científicas y presentaciones.
+*Un pipeline automatizado en R para modelado, validación cruzada y pronóstico de $PM_{2.5}$ listo para publicaciones científicas.*
+
+<br />
+
+![Pronóstico de PM2.5 en Tijuana](PM2.5_prediccion.svg)
+
+</div>
+
+---
+
+## 🌟 Características Principales
+
+* **Log-Transformación Pura ($\log(y)$):** Evita de forma rigurosa las predicciones negativas sin distorsionar los datos con constantes arbitrarias.
+* **Validación Cruzada en Paralelo:** Búsqueda en cuadrícula (*Grid Search*) acelerada mediante procesamiento multinúcleo con barra de progreso interactiva.
+* **Evaluación Fuera de Muestra (OOS):** División estricta entre entrenamiento y prueba (*Hold-out set*) para estimar métricas reales de desempeño ($RMSE$ y $MAE$).
+* **Gráficos Estilo Periodístico/Académico:** Generación automática de gráficos vectoriales (`.svg`) estilizados con inspiración en *FiveThirtyEight*.
 
 ---
 
@@ -14,8 +29,11 @@ Está diseñado bajo estándares rigurosos de investigación científica y repro
 
 ```text
 .
+├── PM2.5_prediccion.svg   # Imagen/Preview principal para el README
 ├── pm2.5_predict.R        # Script principal ejecutable (R CLI)
 ├── justfile               # Automatización de tareas (Just task runner)
+├── LICENSE                # Licencia MIT
+├── TJaire.Rproj           # Proyecto de RStudio
 ├── datos/
 │   └── Tijuana.tsv        # Datos de entrada (ejemplo)
 └── resultados/            # Archivos y gráficas generadas automáticamente
