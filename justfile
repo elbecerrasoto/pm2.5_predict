@@ -6,17 +6,17 @@
 default:
     @just --list
 
-# Asegurar permisos de ejecución en los scripts de R
+# Asegurar permisos de ejecución en el script de R
 chmod:
-    chmod +x pm2.5_predict
+    chmod +x pm2.5_predict.R
 
 # Ejecutar predicción directa en un dataset (sin Cross-Validation)
 predict input="datos/Tijuana.tsv" out_dir="resultados" end_date="2026-12-31": chmod
-    ./pm2.5_predict -i {{input}} -o {{out_dir}} -p {{end_date}}
+    ./pm2.5_predict.R -i {{input}} -o {{out_dir}} -p {{end_date}}
 
 # Ejecutar predicción CON búsqueda por Validación Cruzada (Grid Search)
 cv input="datos/Tijuana.tsv" out_dir="resultados" end_date="2026-12-31": chmod
-    ./pm2.5_predict -i {{input}} -o {{out_dir}} -c -p {{end_date}}
+    ./pm2.5_predict.R -i {{input}} -o {{out_dir}} -c -p {{end_date}}
 
 # Acceso rápido: Ejecución estándar para Tijuana
 tijuana:
@@ -36,4 +36,4 @@ install-deps:
 
 # Dar formato automático al código R usando el paquete 'styler'
 format:
-    Rscript -e 'if (!requireNamespace("styler", quietly = TRUE)) install.packages("styler"); styler::style_file("pm2.5_predict")'
+    Rscript -e 'styler::style_file("pm2.5_predict.R")'
