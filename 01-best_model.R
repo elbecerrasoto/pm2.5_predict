@@ -10,8 +10,6 @@
 # ==============================================================================
 library(tidyverse) # Manipulación de datos y gráficas (dplyr, ggplot2, lubridate)
 library(glue) # Interpolación de cadenas (strings)
-library(readxl) # Lectura de archivos Excel
-library(writexl) # Exportación a formato Excel
 library(prophet) # Modelado de series de tiempo
 library(future) # Configuración de procesamiento paralelo
 library(furrr) # Aplicación de funciones en paralelo (purrr + future)
@@ -24,7 +22,7 @@ library(Metrics) # Cálculo rápido de métricas de error (RMSE, MAE)
 DIR_RESULTADOS <- "resultados"
 DIR_DATOS <- "datos"
 
-ARCHIVO_DATOS <- file.path(DIR_DATOS, "Tijuana.xlsx")
+ARCHIVO_DATOS <- file.path(DIR_DATOS, "Tijuana.tsv")
 SALIDA_ETIQUETA <- "PM2.5_TJ"
 
 # Bandera de Ejecución
@@ -53,7 +51,7 @@ INTERVALO_CONFIANZA <- 0.95
 
 # Rutas de salida para los archivos generados (Actualizados a SVG)
 SALIDA_MODELO <- file.path(DIR_RESULTADOS, glue("{SALIDA_ETIQUETA}_modelo.Rds"))
-SALIDA_HPARAMS <- file.path(DIR_RESULTADOS, glue("{SALIDA_ETIQUETA}_hparams.xlsx"))
+SALIDA_HPARAMS <- file.path(DIR_RESULTADOS, glue("{SALIDA_ETIQUETA}_hparams.tsv"))
 GRAFICA_CV_METRICAS <- file.path(DIR_RESULTADOS, glue("{SALIDA_ETIQUETA}_cvmetricas.svg"))
 GRAFICA_OOS_DISPERSION <- file.path(DIR_RESULTADOS, glue("{SALIDA_ETIQUETA}_oos_dispersion.svg"))
 GRAFICA_OOS_RESIDUALES <- file.path(DIR_RESULTADOS, glue("{SALIDA_ETIQUETA}_oos_residuales.svg"))
@@ -66,7 +64,7 @@ if (!dir.exists(DIR_RESULTADOS)) {
   dir.create(DIR_RESULTADOS, recursive = TRUE, showWarnings = FALSE)
 }
 
-TJ <- read_excel(ARCHIVO_DATOS)
+TJ <- read_tsv(ARCHIVO_DATOS)
 
 stopifnot("ERROR: Faltan las columnas 'FECHA' y/o 'PM2.5'." = all(c("FECHA", "PM2.5") %in% colnames(TJ)))
 stopifnot("ERROR: Se encontraron valores NAs." = !any(is.na(TJ$FECHA)) && !any(is.na(TJ$PM2.5)))
@@ -209,7 +207,7 @@ hparams_df <- tibble(
   Parametro = c("N_Changepoints", "Changepoint_Prior_Scale", "Seasonality_Mode", "Seasonality_Prior_Scale", "Usar_Festivos_MX", "RMSE_Out_of_Sample", "MAE_Out_of_Sample"),
   Valor = c(as.character(mejor_modelo_params$cp_n), as.character(mejor_modelo_params$cp_prior), mejor_modelo_params$seas_mode, as.character(mejor_modelo_params$seas_prior), as.character(mejor_modelo_params$usar_festivos), as.character(round(rmse_oos, 4)), as.character(round(mae_oos, 4)))
 )
-write_xlsx(hparams_df, SALIDA_HPARAMS)
+write_tsv(hparams_df, SALIDA_HPARAMS)
 
 # ==============================================================================
 # PASO 6. MODELO DE PRODUCCIÓN (ENTRENAMIENTO AL 100%)

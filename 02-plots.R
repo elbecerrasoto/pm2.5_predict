@@ -2,118 +2,46 @@
 # PASO 1. IMPORTAR BIBLIOTECAS NECESARIAS
 # ==============================================================================
 library(tidyverse) # Manipulación de datos y gráficas (dplyr, ggplot2, lubridate)
+library(glue) # Interpolación de cadenas (strings)
 library(readxl) # Lectura de archivos Excel
-library(prophet) # Modelado de series de tiempo
 library(writexl) # Exportación a formato Excel para stakeholders
-library(future) # Configuración de procesamiento paralelo
-library(furrr) # Aplicación de funciones en paralelo (purrr + future)
+library(prophet) # Modelado de series de tiempo
 
 # ==============================================================================
 # PASO 2. VARIABLES GLOBALES Y DE CONFIGURACIÓN
 # ==============================================================================
 # Archivos y Directorios
-ARCHIVO_DATOS <- "datos/Tijuana.xlsx"
 DIR_RESULTADOS <- "resultados"
+DIR_DATOS <- "datos"
+
+ARCHIVO_DATOS <- file.path(DIR_DATOS, "Tijuana.xlsx")
+SALIDA_ETIQUETA <- "PM2.5_TJ"
 
 # Fechas y Parámetros de Predicción
-PROYECCION_INICIO <- ymd("2022-01-01")
 PROYECCION_FINAL <- ymd("2022-12-31")
-INTERVALO_CONFIANZA <- 0.95 # Nivel de confianza para yhat_lower y yhat_upper
-
-# Bandera de Ejecución
-REALIZAR_CV <- FALSE # Cambiar a FALSE para omitir Grid Search si ya conoces los parámetros
-
-# Hiperparámetros de Prophet (Ahora como listas para Grid Search)
-CP_N <- c(25, 10) # Número máximo de puntos de cambio a probar
-CP_RANGE <- 0.8 # Proporción del histórico donde se permiten cambios
-CP_PRIOR_SCALES <- c(0.01, 0.05, 0.1) # Escalas de flexibilidad a probar
 
 # Rutas de salida para los archivos generados
 SALIDA_XLSX <- file.path(DIR_RESULTADOS, "PM2.5_TJ_resultados.xlsx")
-SALIDA_MODELO <- file.path(DIR_RESULTADOS, "PM2.5_TJ_modelo.Rds")
 GRAFICA_RESIDUALES <- file.path(DIR_RESULTADOS, "PM2.5_TJ_residuales.svg")
 GRAFICA_PRINCIPAL <- file.path(DIR_RESULTADOS, "PM2.5_TJ_prediccion.svg")
-GRAFICA_COMPONENTES <- file.path(DIR_RESULTADOS, "PM2.5_TJ_componentes.png")
-GRAFICA_CV_METRICAS <- file.path(DIR_RESULTADOS, "PM2.5_TJ_cv_metricas.png")
+GRAFICA_COMPONENTES <- file.path(DIR_RESULTADOS, "PM2.5_TJ_componentes.svg")
 
 # ==============================================================================
-# PASO 3. PREPARACIÓN DE DIRECTORIO Y DATOS
+# PASO 3. PREPARACIÓN DE DIRECTORIO, DATOS Y ASERCIONES
 # ==============================================================================
-# Crear el directorio de resultados si no existe
 if (!dir.exists(DIR_RESULTADOS)) {
   dir.create(DIR_RESULTADOS, recursive = TRUE, showWarnings = FALSE)
 }
 
-# Cargar tabla, limpiar y aplicar transformación logarítmica
-TJ <- read_excel(ARCHIVO_DATOS) |>
-  mutate(
-    FECHA = as_date(FECHA),
-    PM2.5 = as.numeric(PM2.5)
-  ) |>
-  drop_na(FECHA, PM2.5) # Limpiar valores nulos
-
-TJ_prophet <- TJ |>
-  rename(ds = FECHA, y_original = PM2.5) |>
-  # Transformación LOG para asegurar que no haya predicciones negativas.
-  mutate(y = log(y_original + 1e-9))
-
-
-
-
-
-# ==============================================================================
-# PASO 3. PREPARACIÓN DE DIRECTORIO, DATOS Y ASERCIONES (ASSERTIONS)
-# ==============================================================================
-# Crear el directorio de resultados si no existe
-if (!dir.exists(DIR_RESULTADOS)) {
-  dir.create(DIR_RESULTADOS, recursive = TRUE, showWarnings = FALSE)
-}
-
-# Cargar tabla
 TJ <- read_excel(ARCHIVO_DATOS)
 
-# Aserciones: Garantizar que la tabla tiene la estructura correcta
-stopifnot(
-  "ERROR: La tabla debe contener las columnas exactas 'FECHA' y 'PM2.5'" =
-    all(c("FECHA", "PM2.5") %in% colnames(TJ))
-)
-
-# Aserciones: Garantizar que no hay NAs después de la limpieza
-stopifnot(
-  "ERROR: Se detectaron valores faltantes (NA)" =
-    !any(is.na(TJ$FECHA)) && !any(is.na(TJ$PM2.5))
-)
-
-# Limpiar y castear tipos de datos
-TJ <- TJ |>
-  mutate(
-    FECHA = as_date(FECHA),
-    PM2.5 = as.numeric(PM2.5)
-  ) # |> drop_na(FECHA, PM2.5)
-
+stopifnot("ERROR: Faltan las columnas 'FECHA' y/o 'PM2.5'." = all(c("FECHA", "PM2.5") %in% colnames(TJ)))
+stopifnot("ERROR: Se encontraron valores NAs." = !any(is.na(TJ$FECHA)) && !any(is.na(TJ$PM2.5)))
+stopifnot("ERROR: Valores <= 0 en PM2.5." = all(TJ$PM2.5 > 0))
 
 TJ_prophet <- TJ |>
   rename(ds = FECHA, y_original = PM2.5) |>
-  # Transformación LOG para asegurar que no haya predicciones negativas.
-  mutate(y = log(y_original + 1e-9))
-
-# Separación (Split) de datos: Entrenamiento y Prueba (OOS)
-fecha_corte <- max(TJ_prophet$ds) - days(DIAS_PRUEBA)
-TJ_train <- TJ_prophet |> filter(ds <= fecha_corte)
-TJ_test <- TJ_prophet |> filter(ds > fecha_corte)
-
-cat(sprintf(
-  "Datos divididos: %d filas de entrenamiento, %d filas para prueba (OOS)\n",
-  nrow(TJ_train), nrow(TJ_test)
-))
-
-
-
-
-
-
-
-
+  mutate(ds = as_date(ds), y = log(y_original))
 
 # Calcular días futuros y predecir
 dias_futuros <- as.numeric(PROYECCION_FINAL - max(TJ_prophet$ds))
@@ -130,17 +58,6 @@ resultados <- resultados_log |>
     yhat_upper = exp(yhat_upper)
   )
 
-# quitar dias festivos
-names(resultados)
-
-resultados <- resultados |>
-  select(
-    -(`Ano Nuevo [New Year's Day]`:`Dia del Trabajo [Labour Day] (Observed)_upper`), -(`Natalicio de Benito Juarez [Benito Juarez's birthday]`:`Navidad [Christmas] (Observed)_upper`),
-    -starts_with("multiplicative")
-  )
-
-resultados <- resultados |>
-  filter(ds > ymd("2021-12-31"))
 puntos_cambio <- as_date(modelo_prophet$changepoints)
 
 # ==============================================================================
@@ -229,7 +146,3 @@ ggsave(GRAFICA_PRINCIPAL, plot = grafica_principal, width = 12, height = 7, dpi 
 resultados |>
   select(ds, yhat, yhat_lower, yhat_upper, trend) |>
   write_xlsx(SALIDA_XLSX)
-
-# Exportar el modelo ajustado en formato R (.Rds) para uso posterior
-saveRDS(modelo_prophet, file = SALIDA_MODELO)
-cat(sprintf("\n¡Proceso finalizado con éxito! El modelo se guardó en: %s\n", SALIDA_MODELO))
